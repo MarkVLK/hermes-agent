@@ -30,19 +30,37 @@ repo root.
 3. Install **Expo Go** from the App Store, scan the QR code, and enter your
    gateway URL on the connect screen.
 
-The app auto-detects the gateway's auth mode from `GET /api/status`. Token
-mode (private/loopback binds) works today; OAuth-gated gateways are not wired
-up yet.
+The app auto-detects the gateway's auth mode from `GET /api/status`:
+
+- **Token mode** (private/loopback binds): connects immediately using the
+  gateway's session token.
+- **OAuth-gated** (e.g. behind Nous Portal): the app opens the gateway's own
+  login page in an in-app browser. Sign in once; the session cookies are
+  shared with the app (rotating refresh keeps you signed in ~30 days), and
+  every WebSocket connect mints a fresh single-use ticket via
+  `POST /api/auth/ws-ticket`. When the session finally expires you're
+  bounced back to the sign-in screen.
 
 ## Sections
 
 - **Chat** — sessions list (`session.list`), streaming conversations
-  (`prompt.submit` + `message.delta`/`tool.*` events), tool cards, and
-  approve/deny sheets for `approval.request`.
+  (`prompt.submit` + `message.delta`/`tool.*` events), tool cards with
+  colored **diff cards** for file edits (`inline_diff`), photo
+  **attachments** (`image.attach_bytes`), and approve/deny sheets for
+  `approval.request`.
 - **Code** — browse the gateway host's filesystem (`/api/fs/list`), preview
   files (`/api/fs/read-text`).
 - **Projects** — Hermes v0.18.0 first-class Projects (`projects.tree`), with
   "new chat in project". Older gateways see an upgrade hint.
+
+## Notifications
+
+The app asks for notification permission and fires **local** alerts when an
+approval request or turn completion arrives while the app isn't foregrounded.
+Caveat: iOS suspends the app (and its WebSocket) shortly after backgrounding,
+so alerts only fire in that short window. Real remote push for long-running
+turns needs an APNs pipeline on the gateway side, which doesn't exist yet —
+see `docs/plans/ios-app-feasibility.md` §6.2.
 
 ## Development
 

@@ -69,6 +69,19 @@ test('tool lifecycle: start → progress → complete keyed by tool id', () => {
   assert.equal(tool.detail, 'partial');
 });
 
+test('tool.complete inline_diff becomes a diff card on the tool item', () => {
+  const state = run([
+    { type: 'tool.start', payload: { tool_id: 't9', name: 'editor' } },
+    {
+      type: 'tool.complete',
+      payload: { tool_id: 't9', inline_diff: '--- a/x.py\n+++ b/x.py\n-old line\n+new line\n' },
+    },
+  ]);
+  const tool = state.items[0] as { status: string; diff?: string };
+  assert.equal(tool.status, 'done');
+  assert.match(tool.diff ?? '', /\+new line/);
+});
+
 test('tool.complete with error marks the card as error', () => {
   const state = run([
     { type: 'tool.start', payload: { tool_id: 't2', name: 'Edit' } },

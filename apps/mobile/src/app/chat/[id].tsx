@@ -12,14 +12,20 @@ import {
   View,
 } from 'react-native';
 
+import * as ImagePicker from 'expo-image-picker';
+
+import { DiffLines } from '@/components/diff-lines';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { ensureNotificationPermission } from '@/lib/notifications';
 import type { ChatItem } from '@/store/message-stream';
 import { emptyStream } from '@/store/message-stream';
 import {
+  $pendingAttachments,
   $streams,
+  attachImage,
   interrupt,
   openSession,
   respondApproval,
@@ -64,6 +70,7 @@ function MessageRow({ item }: { item: ChatItem }) {
               {item.detail}
             </ThemedText>
           ) : null}
+          {item.diff ? <DiffLines diff={item.diff} /> : null}
         </View>
       );
     case 'notice':
@@ -86,6 +93,28 @@ export default function ChatThread() {
 
   const streams = useStore($streams);
   const stream = (liveId && streams[liveId]) || emptyStream;
+  const attachments = useStore($pendingAttachments);
+  const attachedCount = (liveId && attachments[liveId]) || 0;
+
+  useEffect(() => {
+    void ensureNotificationPermission();
+  }, []);
+
+  const pickAndAttach = async () => {
+    if (!liveId) {
+      return;
+    }
+    const picked = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: 'images',
+      base64: true,
+      quality: 0.8,
+    });
+    const asset = picked.assets?.[0];
+    if (picked.canceled || !asset?.base64) {
+      return;
+    }
+    await attachImage(liveId, asset.base64, asset.fileName ?? undefined);
+  };
 
   useEffect(() => {
     if (liveId) {
@@ -190,7 +219,19 @@ export default function ChatThread() {
           </View>
         ) : null}
 
+        {attachedCount > 0 ? (
+          <ThemedText type="small" themeColor="textSecondary" style={styles.status}>
+            📎 {attachedCount} image{attachedCount > 1 ? 's' : ''} attached to next message
+          </ThemedText>
+        ) : null}
+
         <View style={[styles.composer, { borderTopColor: colors.backgroundElement }]}>
+          <Pressable
+            style={[styles.sendButton, { backgroundColor: colors.backgroundElement }]}
+            onPress={() => void pickAndAttach().catch(() => {})}
+            disabled={!liveId}>
+            <ThemedText type="smallBold">＋</ThemedText>
+          </Pressable>
           <TextInput
             style={[styles.input, { color: colors.text, backgroundColor: colors.backgroundElement }]}
             placeholder={liveId ? 'Message Hermes…' : 'Connecting to session…'}

@@ -131,6 +131,8 @@ export interface ToolCompletePayload extends ToolStartPayload {
   output?: unknown;
   result?: unknown;
   error?: string;
+  /** Server-rendered unified diff for file-editing tools (tui_gateway/server.py). */
+  inline_diff?: string;
 }
 
 export interface StatusUpdatePayload {

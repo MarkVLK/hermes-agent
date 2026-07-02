@@ -3,22 +3,37 @@
  * app-layer reconnect policy the shared client deliberately leaves out
  * (see the desktop's `use-gateway-boot.ts`): reconnect when the app returns
  * to the foreground, since iOS tears sockets down on suspend.
+ *
+ * Gated (OAuth) gateways: the user logs in once inside an in-app WebView
+ * (`/login` on the gateway, which round-trips through Nous Portal or any
+ * other registered provider). The WebView shares its cookie jar with the
+ * app's fetch, so afterwards `/api/auth/me` succeeds, every REST call rides
+ * the rotating session cookies, and each WS connect mints a fresh
+ * single-use `?ticket=`. When the refresh cookie finally dies (~30 days),
+ * ticket minting 401s and we drop back to `login_required`.
  */
 
 import { atom } from 'nanostores';
 import { AppState } from 'react-native';
 
 import { HermesGateway } from '../gateway/client';
-import { resolveConnection, type ConnectionConfig } from '../gateway/connection';
+import {
+  fetchAuthMe,
+  NotLoggedInError,
+  resolveConnection,
+  type AuthPrincipal,
+  type ConnectionConfig,
+} from '../gateway/connection';
 import type { GatewayStatus } from '../gateway/types';
 import { clearConnection, loadConnection, saveConnection } from '../lib/credentials';
 
-export type ConnectionPhase = 'disconnected' | 'connecting' | 'connected' | 'error';
+export type ConnectionPhase = 'disconnected' | 'connecting' | 'login_required' | 'connected' | 'error';
 
 export interface ConnectionSnapshot {
   phase: ConnectionPhase;
   config: ConnectionConfig | null;
   status: GatewayStatus | null;
+  principal: AuthPrincipal | null;
   error: string | null;
 }
 
@@ -26,6 +41,7 @@ export const $connection = atom<ConnectionSnapshot>({
   phase: 'disconnected',
   config: null,
   status: null,
+  principal: null,
   error: null,
 });
 
@@ -71,16 +87,46 @@ export async function connectTo(input: string): Promise<void> {
   setSnapshot({ phase: 'connecting', error: null });
   try {
     const { config, status } = await resolveConnection(input);
+    await saveConnection(config);
     if (status.auth_required) {
-      throw new Error(
-        'This gateway requires OAuth login. Gated gateways are not supported yet — bind the dashboard on a private/Tailscale interface, or use --insecure on a trusted LAN.',
-      );
+      const principal = await fetchAuthMe(config.baseUrl);
+      if (!principal) {
+        setSnapshot({ phase: 'login_required', config, status, principal: null, error: null });
+        return;
+      }
+      setSnapshot({ principal });
     }
     await openGateway(config, status);
-    await saveConnection(config);
   } catch (error) {
+    if (error instanceof NotLoggedInError) {
+      setSnapshot({ phase: 'login_required', error: null });
+      return;
+    }
     setSnapshot({ phase: 'error', error: error instanceof Error ? error.message : String(error) });
     throw error;
+  }
+}
+
+/**
+ * Called after the in-app WebView login lands back on the gateway: verify
+ * the cookie session took, then bring the WebSocket up.
+ */
+export async function completeLogin(): Promise<boolean> {
+  const { config, status } = $connection.get();
+  if (!config) {
+    return false;
+  }
+  const principal = await fetchAuthMe(config.baseUrl);
+  if (!principal) {
+    return false;
+  }
+  setSnapshot({ principal });
+  try {
+    await openGateway(config, status);
+    return true;
+  } catch (error) {
+    setSnapshot({ phase: 'error', error: error instanceof Error ? error.message : String(error) });
+    return false;
   }
 }
 
@@ -92,9 +138,10 @@ export async function restoreConnection(): Promise<boolean> {
   }
   try {
     // Re-resolve instead of trusting the stored token: the session token
-    // rotates on every gateway restart.
+    // rotates on every gateway restart (cookie sessions survive in the OS
+    // cookie store and are re-checked by connectTo).
     await connectTo(saved.baseUrl);
-    return true;
+    return $connection.get().phase === 'connected';
   } catch {
     return false;
   }
@@ -112,7 +159,7 @@ export async function disconnect(): Promise<void> {
   gateway?.close();
   gateway = null;
   await clearConnection();
-  $connection.set({ phase: 'disconnected', config: null, status: null, error: null });
+  $connection.set({ phase: 'disconnected', config: null, status: null, principal: null, error: null });
 }
 
 function wireAppStateReconnect(): void {
@@ -125,7 +172,12 @@ function wireAppStateReconnect(): void {
       return;
     }
     const snap = $connection.get();
-    if (snap.config && snap.phase !== 'connected' && snap.phase !== 'connecting') {
+    if (
+      snap.config &&
+      snap.phase !== 'connected' &&
+      snap.phase !== 'connecting' &&
+      snap.phase !== 'login_required'
+    ) {
       void reconnect().catch(() => {});
     }
   });

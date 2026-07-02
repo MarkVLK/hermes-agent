@@ -25,6 +25,14 @@ export interface ConnectionConfig {
 
 const TOKEN_RE = /__HERMES_SESSION_TOKEN__\s*=\s*"([^"]+)"/;
 
+/** Gated gateway rejected our cookies — the user must (re-)log in. */
+export class NotLoggedInError extends Error {
+  constructor() {
+    super('not logged in');
+    this.name = 'NotLoggedInError';
+  }
+}
+
 /** "myhost:8899" → "http://myhost:8899"; strips trailing slashes. */
 export function normalizeBaseUrl(input: string): string {
   let raw = input.trim();
@@ -85,14 +93,47 @@ export async function scrapeSessionToken(baseUrl: string, fetchImpl: typeof fetc
   return token;
 }
 
+export interface AuthPrincipal {
+  user_id?: string;
+  email?: string | null;
+  display_name?: string | null;
+  provider?: string;
+  expires_at?: number;
+}
+
+/**
+ * Gated mode: whoami against the cookie session. Returns null on 401 (not
+ * logged in yet / cookies expired), throws on transport errors. RN's fetch
+ * shares the OS cookie store with the login WebView, so this works right
+ * after an in-app browser login.
+ */
+export async function fetchAuthMe(baseUrl: string, fetchImpl: typeof fetch = fetch): Promise<AuthPrincipal | null> {
+  const res = await fetchImpl(`${baseUrl}/api/auth/me`, { credentials: 'include' });
+  if (res.status === 401 || res.status === 403) {
+    return null;
+  }
+  if (!res.ok) {
+    throw new Error(`auth check failed: HTTP ${res.status}`);
+  }
+  return (await res.json()) as AuthPrincipal;
+}
+
+/** The gateway's interactive login page (provider buttons / password form). */
+export function loginUrl(baseUrl: string): string {
+  return `${baseUrl}/login`;
+}
+
 /** Gated mode: mint a fresh single-use WS ticket. Requires a cookie session. */
 export async function mintWsTicket(baseUrl: string, fetchImpl: typeof fetch = fetch): Promise<string> {
   const res = await fetchImpl(`${baseUrl}/api/auth/ws-ticket`, {
     method: 'POST',
     credentials: 'include',
   });
+  if (res.status === 401 || res.status === 403) {
+    throw new NotLoggedInError();
+  }
   if (!res.ok) {
-    throw new Error(`ws-ticket mint failed: HTTP ${res.status} (are you logged in?)`);
+    throw new Error(`ws-ticket mint failed: HTTP ${res.status}`);
   }
   const body = (await res.json()) as { ticket?: string };
   if (!body.ticket) {

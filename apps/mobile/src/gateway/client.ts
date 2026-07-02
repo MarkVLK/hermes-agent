@@ -94,6 +94,19 @@ export class HermesGateway extends JsonRpcGatewayClient {
     return this.request('clarify.respond', { session_id: sessionId, id: requestId, text });
   }
 
+  /**
+   * Attach an image to the session's next prompt from raw base64 bytes —
+   * the remote-client path (`image.attach_bytes`), since the phone's photo
+   * only exists on the phone.
+   */
+  imageAttachBytes(sessionId: string, contentBase64: string, filename?: string): Promise<{ attached?: unknown }> {
+    return this.request('image.attach_bytes', {
+      session_id: sessionId,
+      content_base64: contentBase64,
+      ...(filename ? { filename } : {}),
+    });
+  }
+
   // --- projects (gateway v0.18.0+) -------------------------------------------
 
   projectsList(): Promise<ProjectsListResult> {

@@ -11,6 +11,9 @@ export default function TabsLayout() {
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const connection = useStore($connection);
 
+  if (connection.phase === 'login_required') {
+    return <Redirect href="/login" />;
+  }
   if (connection.phase !== 'connected' && connection.phase !== 'connecting') {
     return <Redirect href="/connect" />;
   }

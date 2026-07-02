@@ -16,11 +16,14 @@ import {
   fromHistory,
   type StreamState,
 } from './message-stream';
+import { notifyIfBackgrounded } from '../lib/notifications';
 import { peekGateway } from './connection';
 
 export const $sessions = atom<SessionSummary[]>([]);
 export const $sessionsLoading = atom(false);
 export const $streams = map<Record<string, StreamState>>({});
+/** Count of images attached to the next prompt, per session (composer chip). */
+export const $pendingAttachments = map<Record<string, number>>({});
 
 let eventsUnsub: (() => void) | null = null;
 let wiredTo: HermesGateway | null = null;
@@ -51,6 +54,11 @@ export function wireEvents(gateway: HermesGateway): void {
       return;
     }
     $streams.setKey(sessionId, applyEvent(streamFor(sessionId), event));
+    if (event.type === 'approval.request' || event.type === 'clarify.request') {
+      notifyIfBackgrounded('Hermes needs input', 'A running task is waiting for your response.');
+    } else if (event.type === 'message.complete') {
+      notifyIfBackgrounded('Hermes finished', 'The agent completed its turn.');
+    }
   });
 }
 
@@ -89,7 +97,15 @@ export async function openSession(storedSessionId: string): Promise<string> {
 export async function sendPrompt(sessionId: string, text: string): Promise<void> {
   const gateway = requireGateway();
   $streams.setKey(sessionId, appendUserMessage(streamFor(sessionId), text));
+  $pendingAttachments.setKey(sessionId, 0);
   await gateway.promptSubmit(sessionId, text);
+}
+
+/** Attach a picked photo to the session's next prompt. */
+export async function attachImage(sessionId: string, base64: string, filename?: string): Promise<void> {
+  const gateway = requireGateway();
+  await gateway.imageAttachBytes(sessionId, base64, filename);
+  $pendingAttachments.setKey(sessionId, ($pendingAttachments.get()[sessionId] ?? 0) + 1);
 }
 
 export async function interrupt(sessionId: string): Promise<void> {

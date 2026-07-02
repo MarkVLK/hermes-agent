@@ -26,6 +26,8 @@ export type ChatItem =
       name: string;
       status: 'running' | 'done' | 'error';
       detail?: string;
+      /** Unified diff (from tool.complete's inline_diff) for edit tools. */
+      diff?: string;
     }
   | { kind: 'notice'; id: string; text: string };
 
@@ -159,9 +161,11 @@ export function applyEvent(state: StreamState, event: GatewayEvent): StreamState
 
     case 'tool.complete': {
       const payload = (event.payload ?? {}) as ToolCompletePayload;
+      const diff = typeof payload.inline_diff === 'string' && payload.inline_diff.trim() ? payload.inline_diff : undefined;
       return updateTool(state, toolKey(payload), {
         status: payload.error ? 'error' : 'done',
         ...(payload.error ? { detail: String(payload.error) } : {}),
+        ...(diff ? { diff } : {}),
       });
     }
 

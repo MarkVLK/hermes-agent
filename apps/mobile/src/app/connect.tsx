@@ -25,6 +25,9 @@ export default function ConnectScreen() {
   if (connection.phase === 'connected') {
     return <Redirect href="/" />;
   }
+  if (connection.phase === 'login_required') {
+    return <Redirect href="/login" />;
+  }
 
   const submit = async () => {
     if (!url.trim() || busy) {

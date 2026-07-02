@@ -31,6 +31,7 @@ export default function RootLayout() {
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="connect" options={{ title: 'Connect to Hermes' }} />
+        <Stack.Screen name="login" options={{ title: 'Sign in' }} />
         <Stack.Screen name="chat/[id]" options={{ title: 'Chat' }} />
         <Stack.Screen name="file" options={{ title: 'File', presentation: 'modal' }} />
       </Stack>
