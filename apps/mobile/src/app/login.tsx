@@ -1,8 +1,18 @@
 import { useStore } from '@nanostores/react';
 import { Redirect, router, Stack } from 'expo-router';
 import { useRef, useState } from 'react';
-import { Pressable, StyleSheet } from 'react-native';
+import { Platform, Pressable, StyleSheet } from 'react-native';
 import { WebView } from 'react-native-webview';
+
+// Present a stock browser UA. CAPTCHA providers (Privy → Cloudflare
+// Turnstile on Nous Portal) score embedded webviews as low-trust partly by
+// their app-specific UA suffix; a plain Safari/Chrome UA lets the challenge
+// run the same checks it runs in the real browser.
+const BROWSER_UA = Platform.select({
+  ios: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1',
+  default:
+    'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
+});
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -59,6 +69,10 @@ export default function LoginScreen() {
         source={{ uri: loginUrl(base) }}
         sharedCookiesEnabled
         incognito={false}
+        userAgent={BROWSER_UA}
+        thirdPartyCookiesEnabled
+        javaScriptCanOpenWindowsAutomatically
+        setSupportMultipleWindows={false}
         onNavigationStateChange={nav => {
           // Any post-login landing back on the gateway (the SPA shell, the
           // login page's success redirect, …) is our cue to re-check the
