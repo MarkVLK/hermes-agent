@@ -93,6 +93,29 @@ class TestCodexBuildKwargs:
         )
         assert "reasoning" not in kw or kw.get("include") == []
 
+    def test_github_responses_requests_reasoning_summary(self, transport):
+        """#46527: the GitHub Responses branch must request summary="auto" so
+        Copilot returns reasoning text. Without it, reasoning items come back
+        empty and Hermes persists no reasoning/thinking content."""
+        messages = [{"role": "user", "content": "Hi"}]
+        kw = transport.build_kwargs(
+            model="gpt-5.4", messages=messages, tools=[],
+            is_github_responses=True,
+            github_reasoning_extra={"effort": "medium"},
+        )
+        assert kw.get("reasoning") == {"effort": "medium", "summary": "auto"}
+
+    def test_github_responses_keeps_caller_supplied_summary(self, transport):
+        """summary="auto" is a default, not an override — an explicit summary in
+        the caller's Copilot reasoning extras still wins."""
+        messages = [{"role": "user", "content": "Hi"}]
+        kw = transport.build_kwargs(
+            model="gpt-5.4", messages=messages, tools=[],
+            is_github_responses=True,
+            github_reasoning_extra={"effort": "medium", "summary": "detailed"},
+        )
+        assert kw.get("reasoning") == {"effort": "medium", "summary": "detailed"}
+
     def test_cache_key_is_content_addressed_not_session_id(self, transport):
         """prompt_cache_key is content-addressed from the static prefix
         (instructions + tools), not the session_id. This keeps recurring cron

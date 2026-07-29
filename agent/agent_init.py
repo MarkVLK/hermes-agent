@@ -1238,9 +1238,61 @@ def init_agent(
                             agent.provider = _fb["provider"]
                             agent.model = _fb_model or _fb["model"]
                             agent._fallback_activated = True
+                            # Recompute api_mode for the fallback provider/model —
+                            # otherwise it stays whatever was computed above for
+                            # the (unreachable) primary, e.g. a Nous primary
+                            # configured with api_mode: codex_responses leaves
+                            # a Copilot gpt-5-mini fallback stuck on the
+                            # Responses API and silently drops reasoning/
+                            # thinking content. Shares the per-turn fallback
+                            # resolver so both paths stay in sync. See #46527.
+                            from agent.chat_completion_helpers import resolve_fallback_api_mode
+                            _fb_base_url = str(_fb_client.base_url)
+                            agent.api_mode = resolve_fallback_api_mode(
+                                agent, agent.provider, agent.model, _fb_base_url,
+                            )
+                            if hasattr(agent, "_transport_cache"):
+                                agent._transport_cache.clear()
+                            if agent.api_mode == "anthropic_messages":
+                                # The native-Anthropic setup block above ran
+                                # against the primary's api_mode and is behind
+                                # us now, so the Anthropic runtime attributes
+                                # it owns (_anthropic_client / _anthropic_api_key
+                                # / _anthropic_base_url / _is_anthropic_oauth)
+                                # are still unset. Build them here the same way
+                                # try_activate_fallback does for the per-turn
+                                # path — without this the recomputed mode would
+                                # hand the turn to a None Anthropic client and
+                                # the _primary_runtime snapshot would raise
+                                # AttributeError during init.
+                                from agent.anthropic_adapter import (
+                                    build_anthropic_client,
+                                    resolve_anthropic_token,
+                                    _is_oauth_token,
+                                )
+                                # Only native Anthropic may borrow ANTHROPIC_TOKEN;
+                                # third-party Messages-protocol endpoints must use
+                                # their own credential (#1739).
+                                _fb_is_native_anthropic = agent.provider == "anthropic"
+                                _fb_key = (
+                                    (_fb_client.api_key or resolve_anthropic_token() or "")
+                                    if _fb_is_native_anthropic
+                                    else (_fb_client.api_key or "")
+                                )
+                                agent.api_key = _fb_key
+                                agent._anthropic_api_key = _fb_key
+                                agent._anthropic_base_url = _fb_base_url
+                                agent._anthropic_client = build_anthropic_client(
+                                    _fb_key, _fb_base_url, timeout=_provider_timeout,
+                                )
+                                agent._is_anthropic_oauth = (
+                                    _is_oauth_token(_fb_key)
+                                    if (_fb_is_native_anthropic and isinstance(_fb_key, str))
+                                    else False
+                                )
                             client_kwargs = {
                                 "api_key": _fb_client.api_key,
-                                "base_url": str(_fb_client.base_url),
+                                "base_url": _fb_base_url,
                             }
                             if _provider_timeout is not None:
                                 client_kwargs["timeout"] = _provider_timeout

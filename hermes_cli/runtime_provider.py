@@ -325,8 +325,6 @@ def _copilot_runtime_api_mode(
 ) -> str:
     configured_provider = str(model_cfg.get("provider") or "").strip().lower()
     configured_mode = _parse_api_mode(model_cfg.get("api_mode"))
-    if configured_mode and _provider_supports_explicit_api_mode("copilot", configured_provider):
-        return configured_mode
 
     # Use the model being resolved for this runtime, not the persisted global
     # default. MoA slots, fallback models, and mid-session model switches all
@@ -335,6 +333,43 @@ def _copilot_runtime_api_mode(
     # Claude/Gemini MoA slot can inherit codex_responses from a GPT-5 default and
     # fail with "model ... does not support Responses API".
     model_name = str(target_model or model_cfg.get("default") or "").strip()
+
+    if configured_mode and _provider_supports_explicit_api_mode("copilot", configured_provider):
+        # Copilot's per-model wire requirement wins over an explicit pin, in
+        # BOTH directions. Copilot serves gpt-5-mini (and every non-GPT slot)
+        # on chat completions only, and the rest of the GPT-5.x family on the
+        # Responses API; sending the other wire silently succeeds but returns
+        # no reasoning/thinking content, or fails with "model ... does not
+        # support Responses API". A stale pin routinely survives a
+        # provider/model switch in either direction — a previous Nous or Codex
+        # primary writes api_mode: codex_responses and the model is later
+        # changed to gpt-5-mini, or a chat-only pin is left behind when the
+        # model moves up to gpt-5.4. Arbitrate against the *active target
+        # model* (not the persisted default) using the pure-regex Copilot
+        # family rule — no network call. Modes outside the chat/Responses pair
+        # (anthropic_messages, bedrock_converse, codex_app_server) are left
+        # untouched: they are deliberate opt-ins this rule says nothing about.
+        # See #46527.
+        if configured_mode in ("chat_completions", "codex_responses") and model_name:
+            try:
+                from hermes_cli.models import _should_use_copilot_responses_api
+
+                # Strip any "vendor/" prefix a user copied from the Copilot or
+                # OpenRouter catalog ("copilot/gpt-5.4"); the family regex is
+                # anchored at ^gpt- and would otherwise read every prefixed id
+                # as a non-GPT slot and veto a legitimate codex_responses pin.
+                _family_id = model_name.rsplit("/", 1)[-1]
+                required_mode = (
+                    "codex_responses"
+                    if _should_use_copilot_responses_api(_family_id)
+                    else "chat_completions"
+                )
+                if required_mode != configured_mode:
+                    return required_mode
+            except Exception:
+                pass
+        return configured_mode
+
     if not model_name:
         return "chat_completions"
 
